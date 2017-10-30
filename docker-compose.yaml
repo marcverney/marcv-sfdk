@@ -1,0 +1,54 @@
+version: '2.1'
+
+volumes:
+    db_data:
+        driver: 'local'
+
+services:
+    mysql:
+        image: mysql:5.7
+        ports:
+            - ${DB_PORT_HOST}:3306
+        tty: true
+        environment:
+            - MYSQL_ROOT_PASSWORD=${DB_SUPERUSER_PASSWORD}
+            - MYSQL_DATABASE=${DB_DATABASE}
+            - MYSQL_USER=${DB_USER}
+            - MYSQL_PASSWORD=${DB_PASSWORD}
+        volumes:
+            - db_data:/var/lib/mysql
+
+    php:
+        build:
+            context: .
+            dockerfile: Dockerfile-php
+            args:
+                - DB_SCHEMA=${DB_DATABASE}
+                - DB_USER=${DB_USER}
+                - DB_PASSWORD=${DB_PASSWORD}
+                - WEB_ROOT=${DOCUMENT_ROOT}
+                - GIT_USER=${GIT_USER}
+                - GIT_EMAIL=${GIT_EMAIL}
+        links:
+            - mysql
+        tty: true
+        volumes:
+            - ${DOCUMENT_ROOT}:/srv/www/app
+
+    nginx:
+        build:
+            context: .
+            dockerfile: Dockerfile-nginx
+            args:
+                - SERVER_NAME=${WEBSITE_HOSTNAME}
+        networks:
+            default:
+                aliases:
+                    - ${WEBSITE_HOSTNAME}
+        links:
+            - php
+        ports:
+            - ${WEBSITE_PORT}:443
+        volumes:
+            - ${DOCUMENT_ROOT}:/srv/www/app
+        tty: true

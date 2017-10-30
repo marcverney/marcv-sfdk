@@ -1,0 +1,27 @@
+FROM nginx:1.10
+
+ARG SERVER_NAME
+
+COPY ssl/openssl.conf .
+
+# https://unix.stackexchange.com/a/322083/152780
+RUN openssl req -new -x509 -sha256 -nodes   \
+        -config  openssl.conf               \
+        -newkey  rsa:2048                   \
+        -days    365                        \
+        -keyout  /etc/ssl/certs/server.key  \
+        -out     /etc/ssl/certs/server.crt  \
+    && chmod 600 /etc/ssl/certs/server.key  \
+    && chmod 644 /etc/ssl/certs/server.crt  \
+    && rm openssl.conf
+
+RUN openssl dhparam -dsaparam -out /etc/ssl/private/dhparam.pem 4096 \
+    && chmod 644 /etc/ssl/private/dhparam.pem
+
+RUN usermod -a -G www-data nginx
+
+WORKDIR /etc/nginx
+
+RUN rm conf.d/default.conf
+COPY nginx/server.conf conf.d/
+RUN sed -Ei "s/%SERVER_NAME%/$SERVER_NAME/" conf.d/server.conf

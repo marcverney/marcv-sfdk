@@ -1,0 +1,111 @@
+FROM php:7.1.10-fpm
+
+ARG DB_SCHEMA
+ARG DB_USER
+ARG DB_PASSWORD
+ARG WEB_ROOT
+ARG GIT_USER
+ARG GIT_EMAIL
+ARG TIMEZONE
+
+WORKDIR /usr/local/etc
+
+# SETUP SERVER
+# =============
+RUN apt-get update && apt-get install -y \
+    #
+    apt-transport-https \
+    #
+    curl \
+    # Needed by Composer
+    unzip \
+    #
+    git \
+    #
+    vim \
+    # Needed by the UpdateTestSQLDumpCommand
+    mysql-client
+RUN { \
+        echo "[core]"; \
+        echo "	fileMode = false"; \
+        echo "[user]"; \
+        echo "	name = '$GIT_USER'"; \
+        echo "	email = $GIT_EMAIL"; \
+    } > /etc/gitconfig
+COPY system/vimrc /etc/vim/vimrc.local
+# https://stackoverflow.com/a/42344810/2516943
+RUN ln -fs "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime \
+    && dpkg-reconfigure --frontend noninteractive tzdata
+
+# INSTALL PHP EXTENSIONS
+# ======================
+RUN apt-get update \
+    \
+    # OPCACHE
+    && docker-php-ext-install -j$(nproc) opcache \
+    \
+    # PDO_MYSQL
+    && docker-php-ext-install -j$(nproc) pdo_mysql
+
+# INTL WITH UPDATED ICU LIB
+# from https://github.com/docker-library/php/issues/455#issuecomment-309921509
+RUN curl -fsS -o /tmp/icu.tgz -L http://download.icu-project.org/files/icu4c/59.1/icu4c-59_1-src.tgz \
+    && tar -zxf /tmp/icu.tgz -C /tmp \
+    && cd /tmp/icu/source \
+    && ./configure --prefix=/usr/local \
+    && make \
+    && make install \
+    && rm -rf /tmp/icu*
+ENV PHP_CPPFLAGS="$PHP_CPPFLAGS -std=c++11"
+RUN docker-php-ext-configure intl --with-icu-dir=/usr/local \
+    && docker-php-ext-install intl
+
+# APCU
+RUN pecl channel-update pecl.php.net && pecl install apcu
+COPY php/apcu.ini php/conf.d/
+
+# XDEBUG
+RUN pecl channel-update pecl.php.net && pecl install xdebug
+COPY php/xdebug.ini php/conf.d/
+
+# NODE.JS, FOR WEBPACK
+# ====================
+RUN curl https://deb.nodesource.com/node_6.x/pool/main/n/nodejs/nodejs_6.9.2-1nodesource1~jessie1_amd64.deb -o node.deb \
+    && dpkg -i node.deb \
+    && rm node.deb
+RUN curl -LsS https://dl.yarnpkg.com/debian/pubkey.gpg -o yarn-pubkey.gpg \
+    && apt-key add yarn-pubkey.gpg \
+    && rm yarn-pubkey.gpg \
+    && echo "deb https://dl.yarnpkg.com/debian/ stable main" > /etc/apt/sources.list.d/yarn.list \
+    && apt-get update \
+    && apt-get install -y yarn
+
+# CONFIGURATION
+# =============
+COPY php/php.ini php/
+COPY php/*.conf php-fpm.d/
+RUN { \
+        echo "; Symfony environment variables"; \
+        echo "env[APP_ENV] = dev"; \
+        echo "env[APP_DEBUG] = 1"; \
+        echo "env[APP_DB_HOST] = mysql"; \
+        echo "env[APP_DB_PORT] = 3306"; \
+        echo "env[APP_DB_NAME] = $DB_SCHEMA"; \
+        echo "env[APP_DB_USER] = $DB_USER"; \
+        echo "env[APP_DB_PASSWORD] = $DB_PASSWORD"; \
+        echo "env[APP_LOG_PATH] = $WEB_ROOT/var/log/symfony.log"; \
+        echo "env[APP_SECRET] = e70cfc08ed8eb8defbe476d6db15ce38a4d5c875"; \
+    } > php-fpm.d/symfony-env.conf
+
+# INSTALL COMPOSER
+# (using sync because of https://github.com/docker/docker/issues/9547)
+# ================
+COPY php/install-composer.sh .
+RUN chmod +x install-composer.sh \
+    && sync \
+    && ./install-composer.sh \
+    && rm install-composer.sh
+# https://getcomposer.org/doc/03-cli.md#composer-allow-superuser
+ENV COMPOSER_ALLOW_SUPERUSER 1
+
+WORKDIR /srv/www/app
