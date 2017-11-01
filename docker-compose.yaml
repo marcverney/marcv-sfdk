@@ -29,8 +29,6 @@ services:
                 - WEB_ROOT=${DOCUMENT_ROOT}
                 - GIT_USER=${GIT_USER}
                 - GIT_EMAIL=${GIT_EMAIL}
-        links:
-            - mysql
         tty: true
         volumes:
             - ${DOCUMENT_ROOT}:/srv/www/app
@@ -45,8 +43,6 @@ services:
             default:
                 aliases:
                     - ${WEBSITE_HOSTNAME}
-        links:
-            - php
         ports:
             - ${WEBSITE_PORT}:443
         volumes:
